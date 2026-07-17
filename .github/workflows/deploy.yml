@@ -1,0 +1,41 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Add GitHub and EC2 to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          ssh-keyscan ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy
+        run: |
+          ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            set -e
+
+            cd ~/projects/airflow-etl-pipeline
+
+            git pull origin main
+
+            mkdir -p ~/airflow/dags
+
+            rsync -av --delete dags/ ~/airflow/dags/
+
+            sudo systemctl restart airflow-scheduler
+          EOF
