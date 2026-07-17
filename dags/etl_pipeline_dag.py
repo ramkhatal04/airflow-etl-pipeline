@@ -1,9 +1,18 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from datetime import datetime
-from scripts.api_extract import extract_users
 import boto3
 import csv
+import json
+
+from scripts.api_extract import extract_users
+
+
+RAW_JSON = "/tmp/raw_users.json"
+CSV_FILE = "/tmp/customers.csv"
+
+BUCKET_NAME = "airflow-etl-pipeline-2026"
+S3_KEY = "raw/customers.csv"
 
 
 def fetch_api_data():
@@ -11,51 +20,72 @@ def fetch_api_data():
 
 
 def clean_data():
-    print("Cleaning raw data")
+    with open(RAW_JSON, "r") as file:
+        users = json.load(file)
+
+    cleaned_users = []
+
+    for user in users:
+        cleaned_users.append(
+            {
+                "id": user["id"],
+                "name": user["name"],
+                "email": user["email"],
+                "city": user["address"]["city"]
+            }
+        )
+
+    with open("/tmp/clean_users.json", "w") as file:
+        json.dump(cleaned_users, file, indent=4)
+
+    print(f"Cleaned {len(cleaned_users)} records")
 
 
 def create_csv():
-    file_name = "/tmp/customers.csv"
+    with open("/tmp/clean_users.json", "r") as file:
+        users = json.load(file)
 
-    data = [
-        ["id", "name", "city"],
-        [1, "Ram", "Pune"],
-        [2, "Alex", "Mumbai"],
-    ]
+    with open(CSV_FILE, "w", newline="") as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=[
+                "id",
+                "name",
+                "email",
+                "city"
+            ]
+        )
 
-    with open(file_name, "w", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerows(data)
+        writer.writeheader()
+        writer.writerows(users)
 
-    print("CSV file created successfully")
+    print("CSV created successfully")
 
 
 def upload_to_s3():
     s3 = boto3.client("s3")
 
-    bucket_name = "airflow-etl-pipeline-2026"
-
-    file_name = "/tmp/customers.csv"
-
     s3.upload_file(
-        file_name,
-        bucket_name,
-        "raw/customers.csv"
+        CSV_FILE,
+        BUCKET_NAME,
+        S3_KEY
     )
 
-    print("File uploaded to S3 successfully")
+    print(
+        f"Uploaded {CSV_FILE} to s3://{BUCKET_NAME}/{S3_KEY}"
+    )
 
 
 def load_s3_to_snowflake():
-    print("Loading data into Snowflake")
+    print("Snowflake loading step")
 
 
 def run_sql_transformation():
-    print("Running SQL transformation")
+    print("SQL transformation step")
 
 
 def create_clean_table():
-    print("Creating final clean table")
+    print("Final clean table creation step")
 
 
 with DAG(
@@ -64,7 +94,11 @@ with DAG(
     start_date=datetime(2026, 7, 17),
     schedule="@daily",
     catchup=False,
-    tags=["etl", "s3", "snowflake"],
+    tags=[
+        "etl",
+        "s3",
+        "snowflake"
+    ],
 ) as dag:
 
     fetch_api = PythonOperator(
