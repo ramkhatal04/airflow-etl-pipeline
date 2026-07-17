@@ -36,6 +36,7 @@ jobs:
             mkdir -p ~/airflow/dags
 
             rsync -av --delete dags/ ~/airflow/dags/
+            rsync -av --delete scripts/ ~/airflow/dags/scripts/
 
             sudo systemctl restart airflow-scheduler
           EOF
