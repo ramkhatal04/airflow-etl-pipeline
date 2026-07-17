@@ -1,12 +1,13 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from datetime import datetime
+from scripts.api_extract import extract_users
 import boto3
 import csv
 
 
 def fetch_api_data():
-    print("Fetching data from API")
+    extract_users()
 
 
 def clean_data():
