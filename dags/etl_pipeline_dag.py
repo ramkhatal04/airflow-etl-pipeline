@@ -1,6 +1,8 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from datetime import datetime
+import boto3
+import csv
 
 
 def fetch_api_data():
@@ -12,11 +14,35 @@ def clean_data():
 
 
 def create_csv():
-    print("Creating CSV file")
+    file_name = "/tmp/customers.csv"
+
+    data = [
+        ["id", "name", "city"],
+        [1, "Ram", "Pune"],
+        [2, "Alex", "Mumbai"],
+    ]
+
+    with open(file_name, "w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerows(data)
+
+    print("CSV file created successfully")
 
 
 def upload_to_s3():
-    print("Uploading file to S3")
+    s3 = boto3.client("s3")
+
+    bucket_name = "airflow-etl-pipeline-2026"
+
+    file_name = "/tmp/customers.csv"
+
+    s3.upload_file(
+        file_name,
+        bucket_name,
+        "raw/customers.csv"
+    )
+
+    print("File uploaded to S3 successfully")
 
 
 def load_s3_to_snowflake():
@@ -50,7 +76,7 @@ with DAG(
         python_callable=clean_data,
     )
 
-    csv = PythonOperator(
+    csv_file = PythonOperator(
         task_id="create_csv",
         python_callable=create_csv,
     )
@@ -78,7 +104,7 @@ with DAG(
     (
         fetch_api
         >> clean
-        >> csv
+        >> csv_file
         >> upload
         >> snowflake
         >> transform
