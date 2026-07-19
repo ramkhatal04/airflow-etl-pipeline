@@ -1,6 +1,6 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.providers.snowflake.operators.snowflake import SnowflakeOperator
+from airflow.providers.snowflake.operators.snowflake import SnowflakeSqlApiOperator
 
 from datetime import datetime
 
@@ -120,7 +120,7 @@ with DAG(
     )
 
 
-    load_to_snowflake = SnowflakeOperator(
+    load_to_snowflake = SnowflakeSqlApiOperator(
 
         task_id="load_to_snowflake",
 
