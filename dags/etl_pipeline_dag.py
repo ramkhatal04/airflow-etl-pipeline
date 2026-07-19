@@ -1,12 +1,13 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.providers.snowflake.operators.snowflake import SnowflakeOperator
+from airflow.providers.snowflake.operators.snowflake import SnowflakeSqlApiOperator
 from datetime import datetime
 import boto3
 import csv
 import json
 
 from scripts.api_extract import extract_users
+
 
 RAW_JSON = "/tmp/raw_users.json"
 CLEAN_JSON = "/tmp/clean_users.json"
@@ -72,16 +73,22 @@ def upload_to_s3():
         S3_KEY,
     )
 
-    print(f"Uploaded {CSV_FILE} to s3://{BUCKET_NAME}/{S3_KEY}")
+    print(
+        f"Uploaded {CSV_FILE} to s3://{BUCKET_NAME}/{S3_KEY}"
+    )
 
 
 with DAG(
     dag_id="production_etl_pipeline",
-    description="API → S3 → Snowflake ETL Pipeline",
+    description="API to S3 to Snowflake ETL pipeline",
     start_date=datetime(2026, 7, 17),
     schedule="@daily",
     catchup=False,
-    tags=["etl", "aws", "snowflake"],
+    tags=[
+        "etl",
+        "aws",
+        "snowflake",
+    ],
 ) as dag:
 
     fetch_api = PythonOperator(
@@ -89,22 +96,26 @@ with DAG(
         python_callable=fetch_api_data,
     )
 
+
     clean = PythonOperator(
         task_id="clean_data",
         python_callable=clean_data,
     )
 
-    csv_task = PythonOperator(
+
+    csv_file = PythonOperator(
         task_id="create_csv",
         python_callable=create_csv,
     )
+
 
     upload = PythonOperator(
         task_id="upload_to_s3",
         python_callable=upload_to_s3,
     )
 
-    load_to_snowflake = SnowflakeOperator(
+
+    load_to_snowflake = SnowflakeSqlApiOperator(
         task_id="load_to_snowflake",
         snowflake_conn_id="snowflake_conn",
         sql="""
@@ -127,4 +138,5 @@ with DAG(
         """,
     )
 
-    fetch_api >> clean >> csv_task >> upload >> load_to_snowflake
+
+    fetch_api >> clean >> csv_file >> upload >> load_to_snowflake
