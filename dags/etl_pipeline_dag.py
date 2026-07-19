@@ -1,7 +1,9 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.providers.snowflake.operators.snowflake import SnowflakeSqlApiOperator
+from airflow.providers.snowflake.operators.snowflake import SnowflakeOperator
+
 from datetime import datetime
+
 import boto3
 import csv
 import json
@@ -48,6 +50,7 @@ def create_csv():
         users = json.load(file)
 
     with open(CSV_FILE, "w", newline="") as file:
+
         writer = csv.DictWriter(
             file,
             fieldnames=[
@@ -65,6 +68,7 @@ def create_csv():
 
 
 def upload_to_s3():
+
     s3 = boto3.client("s3")
 
     s3.upload_file(
@@ -80,16 +84,17 @@ def upload_to_s3():
 
 with DAG(
     dag_id="production_etl_pipeline",
-    description="API to S3 to Snowflake ETL pipeline",
+    description="API to S3 to Snowflake ETL Pipeline",
     start_date=datetime(2026, 7, 17),
     schedule="@daily",
     catchup=False,
     tags=[
         "etl",
         "aws",
-        "snowflake",
+        "snowflake"
     ],
 ) as dag:
+
 
     fetch_api = PythonOperator(
         task_id="fetch_api_data",
@@ -103,7 +108,7 @@ with DAG(
     )
 
 
-    csv_file = PythonOperator(
+    csv_task = PythonOperator(
         task_id="create_csv",
         python_callable=create_csv,
     )
@@ -115,28 +120,50 @@ with DAG(
     )
 
 
-    load_to_snowflake = SnowflakeSqlApiOperator(
+    load_to_snowflake = SnowflakeOperator(
+
         task_id="load_to_snowflake",
+
         snowflake_conn_id="snowflake_conn",
+
+        hook_params={
+            "authenticator": "snowflake"
+        },
+
         sql="""
+
         CREATE TABLE IF NOT EXISTS CUSTOMERS (
+
             ID NUMBER,
+
             NAME STRING,
+
             EMAIL STRING,
+
             CITY STRING
+
         );
+
 
         TRUNCATE TABLE CUSTOMERS;
 
+
         COPY INTO CUSTOMERS
+
         FROM @airflow_s3_stage/customers.csv
+
         FILE_FORMAT = (
+
             TYPE = CSV
+
             SKIP_HEADER = 1
+
             FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+
         );
+
         """,
     )
 
 
-    fetch_api >> clean >> csv_file >> upload >> load_to_snowflake
+    fetch_api >> clean >> csv_task >> upload >> load_to_snowflake
