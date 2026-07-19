@@ -1,5 +1,6 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.providers.snowflake.operators.snowflake import SnowflakeOperator
 from datetime import datetime
 import boto3
 import csv
@@ -7,8 +8,8 @@ import json
 
 from scripts.api_extract import extract_users
 
-
 RAW_JSON = "/tmp/raw_users.json"
+CLEAN_JSON = "/tmp/clean_users.json"
 CSV_FILE = "/tmp/customers.csv"
 
 BUCKET_NAME = "airflow-etl-pipeline-2026"
@@ -31,18 +32,18 @@ def clean_data():
                 "id": user["id"],
                 "name": user["name"],
                 "email": user["email"],
-                "city": user["address"]["city"]
+                "city": user["address"]["city"],
             }
         )
 
-    with open("/tmp/clean_users.json", "w") as file:
+    with open(CLEAN_JSON, "w") as file:
         json.dump(cleaned_users, file, indent=4)
 
     print(f"Cleaned {len(cleaned_users)} records")
 
 
 def create_csv():
-    with open("/tmp/clean_users.json", "r") as file:
+    with open(CLEAN_JSON, "r") as file:
         users = json.load(file)
 
     with open(CSV_FILE, "w", newline="") as file:
@@ -52,8 +53,8 @@ def create_csv():
                 "id",
                 "name",
                 "email",
-                "city"
-            ]
+                "city",
+            ],
         )
 
         writer.writeheader()
@@ -68,37 +69,19 @@ def upload_to_s3():
     s3.upload_file(
         CSV_FILE,
         BUCKET_NAME,
-        S3_KEY
+        S3_KEY,
     )
 
-    print(
-        f"Uploaded {CSV_FILE} to s3://{BUCKET_NAME}/{S3_KEY}"
-    )
-
-
-def load_s3_to_snowflake():
-    print("Snowflake loading step")
-
-
-def run_sql_transformation():
-    print("SQL transformation step")
-
-
-def create_clean_table():
-    print("Final clean table creation step")
+    print(f"Uploaded {CSV_FILE} to s3://{BUCKET_NAME}/{S3_KEY}")
 
 
 with DAG(
     dag_id="production_etl_pipeline",
-    description="API to S3 to Snowflake ETL pipeline",
+    description="API → S3 → Snowflake ETL Pipeline",
     start_date=datetime(2026, 7, 17),
     schedule="@daily",
     catchup=False,
-    tags=[
-        "etl",
-        "s3",
-        "snowflake"
-    ],
+    tags=["etl", "aws", "snowflake"],
 ) as dag:
 
     fetch_api = PythonOperator(
@@ -111,7 +94,7 @@ with DAG(
         python_callable=clean_data,
     )
 
-    csv_file = PythonOperator(
+    csv_task = PythonOperator(
         task_id="create_csv",
         python_callable=create_csv,
     )
@@ -121,27 +104,27 @@ with DAG(
         python_callable=upload_to_s3,
     )
 
-    snowflake = PythonOperator(
-        task_id="load_s3_to_snowflake",
-        python_callable=load_s3_to_snowflake,
+    load_to_snowflake = SnowflakeOperator(
+        task_id="load_to_snowflake",
+        snowflake_conn_id="snowflake_conn",
+        sql="""
+        CREATE TABLE IF NOT EXISTS CUSTOMERS (
+            ID NUMBER,
+            NAME STRING,
+            EMAIL STRING,
+            CITY STRING
+        );
+
+        TRUNCATE TABLE CUSTOMERS;
+
+        COPY INTO CUSTOMERS
+        FROM @airflow_s3_stage/customers.csv
+        FILE_FORMAT = (
+            TYPE = CSV
+            SKIP_HEADER = 1
+            FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+        );
+        """,
     )
 
-    transform = PythonOperator(
-        task_id="run_sql_transformation",
-        python_callable=run_sql_transformation,
-    )
-
-    create_table = PythonOperator(
-        task_id="create_clean_table",
-        python_callable=create_clean_table,
-    )
-
-    (
-        fetch_api
-        >> clean
-        >> csv_file
-        >> upload
-        >> snowflake
-        >> transform
-        >> create_table
-    )
+    fetch_api >> clean >> csv_task >> upload >> load_to_snowflake
